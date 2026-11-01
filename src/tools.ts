@@ -228,6 +228,53 @@ const motrixDownload = defineTool({
   },
 });
 
+const waitParams = Type.Object({
+  taskId: Type.String({ description: "Task id from motrix_download or motrix_tasks" }),
+  waitTimeoutSec: Type.Optional(Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to wait (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` })),
+});
+
+const motrixWait = defineTool({
+  name: "motrix_wait",
+  label: "Motrix: Wait For Task",
+  description:
+    "Wait for an existing Motrix download task to finish, streaming live progress. " +
+    "Use after motrix_download (default async submit) or for tasks already queued in Motrix. " +
+    "Returns the final snapshot; on timeout the task keeps running. " +
+    "Paused tasks never finish — resume them first. " +
+    "When submitting a fresh download you can block immediately with motrix_download wait=true instead.",
+  annotations: { readOnlyHint: true },
+  parameters: waitParams,
+  async execute(_toolCallId, params, signal, onUpdate) {
+    const endpoint = requireEndpoint();
+    const outcome = await waitForTask(
+      endpoint,
+      params.taskId,
+      params.waitTimeoutSec ?? DEFAULT_WAIT_TIMEOUT_SEC,
+      signal,
+      onUpdate,
+    );
+    const t = outcome.task;
+    if (!t) {
+      return { content: [{ type: "text", text: `Task ${params.taskId} not found.` }], details: null };
+    }
+    if (t.status === "error") {
+      return { content: [{ type: "text", text: `Download failed.\n${taskBlock(t)}` }], details: t, isError: true };
+    }
+    if (t.status === "completed" || t.status === "seeding") {
+      const seededNote = t.status === "seeding" ? "\nAll data is downloaded; the torrent is now seeding in Motrix." : "";
+      return { content: [{ type: "text", text: `Download completed.\n${taskBlock(t)}${seededNote}` }], details: t };
+    }
+    const reason = outcome.aborted ? "wait was cancelled" : `wait timed out after ${params.waitTimeoutSec ?? DEFAULT_WAIT_TIMEOUT_SEC}s`;
+    return {
+      content: [{
+        type: "text",
+        text: `${reason}; the task keeps running in Motrix.\n${taskBlock(t)}\nCall motrix_wait again to keep waiting.`,
+      }],
+      details: t,
+    };
+  },
+});
+
 const tasksParams = Type.Object({
   status: Type.Optional(Type.Union([
     Type.Literal("queued"),
@@ -321,6 +368,7 @@ const motrixStats = defineTool({
 
 export function registerMotrixTools(pi: ExtensionAPI): void {
   pi.registerTool(motrixDownload);
+  pi.registerTool(motrixWait);
   pi.registerTool(motrixTasks);
   pi.registerTool(motrixTask);
   pi.registerTool(motrixStats);

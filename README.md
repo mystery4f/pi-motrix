@@ -21,6 +21,7 @@ or add it to your pi settings packages list.
 
 - **motrix_download** — submit a download. Pass `urls` (array), `magnet` (URI), or `torrentPath` (local `.torrent`). Options: `saveDir` (default `~/Downloads`), `filename`, `connections` (1–128), `headers`, `proxy`, `selectedFiles`, `displayName`. By default returns immediately with the task snapshot; pass `wait: true` to block until completion (streams progress updates, `waitTimeoutSec` caps the wait, default 300).
 - **motrix_tasks** — list tasks with live progress, optionally filtered by `status`.
+- **motrix_wait** — block on an already-submitted task until it finishes (streams live progress; on timeout the task keeps running — call again to keep waiting).
 - **motrix_task** — `get` / `pause` / `resume` / `remove` one task; `remove` accepts `deleteFiles`.
 - **motrix_stats** — total speeds and task counts; also confirms the engine is reachable.
 

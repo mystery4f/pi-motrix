@@ -1,6 +1,6 @@
 {
   "name": "pi-motrix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Motrix download manager tools for the Pi coding agent — fast multi-connection downloads for AI agents over the MDXP protocol.",
   "type": "module",
   "license": "MIT",
