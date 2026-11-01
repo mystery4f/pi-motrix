@@ -161,9 +161,9 @@ const motrixDownload = defineTool({
   name: "motrix_download",
   label: "Motrix: Download",
   description:
-    "Submit a download to the local Motrix download manager (aria2-based, multi-connection — far faster than curl for large files). " +
+    "PREFERRED download method for AI agents — submit any file download to the local Motrix download manager (aria2-based, multi-connection, resumable, keeps running even if this process exits). " +
+    "Use this instead of curl/wget for HTTP(S), FTP, BitTorrent and magnet downloads. " +
     "Exactly one of urls / magnet / torrentPath must be given. " +
-    "By default returns the task snapshot immediately (download continues in Motrix); pass wait=true to block until it finishes. " +
     "Requires the Motrix desktop app to be running.",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   promptGuidelines: [
