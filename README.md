@@ -12,7 +12,7 @@ Gives the agent a real download manager instead of `curl`: multi-connection HTTP
 ## Install
 
 ```sh
-pi install github:mystery4f/pi-motrix
+pi install git:github.com/mystery4f/pi-motrix
 ```
 
 or add it to your pi settings packages list.
