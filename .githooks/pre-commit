@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fail closed: typecheck must pass before a commit lands.
+set -e
+
+if [ ! -d node_modules ]; then
+  echo "pre-commit: node_modules is missing - run npm install first" >&2
+  exit 1
+fi
+
+npm run typecheck
