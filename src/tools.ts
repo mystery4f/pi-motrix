@@ -53,8 +53,9 @@ const downloadParams = Type.Object({
   proxy: Type.Optional(Type.String({ description: 'Route this download through a proxy, e.g. "http://127.0.0.1:7890" — use it for geo-restricted, slow or proxy-only sources (URL downloads only)' })),
   selectedFiles: selectedFilesSchema,
   displayName: Type.Optional(Type.String({ description: "Display name for torrent downloads" })),
-  wait: Type.Optional(Type.Boolean({ description: "Wait for the download to finish before returning (default false: returns immediately with the task id)" })),
-  waitTimeoutSec: Type.Optional(Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to wait when wait=true (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` })),
+  mode: Type.Optional(Type.Union([Type.Literal("async"), Type.Literal("sync")], { description: '"async" (default): submit and return the task id immediately so the download runs in Motrix while you keep working; "sync": block until the download reaches a terminal status (progress streams to the client), then report the outcome' })),
+  wait: Type.Optional(Type.Boolean({ description: "Deprecated alias for mode: wait=true means mode=\"sync\", wait=false means mode=\"async\"; mode wins when both are given" })),
+  waitTimeoutSec: Type.Optional(Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to wait in sync mode (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` })),
   idempotencyKey: idempotencyKeySchema,
 });
 
@@ -66,6 +67,12 @@ function requireEndpoint(): MotrixEndpoint {
 
 function countSources(params: DownloadParams): number {
   return (params.urls ? 1 : 0) + (params.magnet ? 1 : 0) + (params.torrentPath ? 1 : 0);
+}
+
+/** Resolve the sync/async choice: explicit mode wins, wait is the deprecated alias, default async. */
+function isSyncMode(params: DownloadParams): boolean {
+  if (params.mode !== undefined) return params.mode === "sync";
+  return params.wait === true;
 }
 
 /** Build the discriminated-union payload for download/add. */
@@ -165,7 +172,7 @@ const motrixDownload = defineTool({
     "Per-download proxy and HTTP headers: pass proxy (e.g. http://127.0.0.1:7890) and headers (referer, user-agent, cookie) so every download takes the network route it needs — this is the reliable way to pull from slow, geo-restricted or proxy-only sources instead of shelling out to curl. " +
     "This is the default tool for anything that must end up as a file on disk — models, datasets, videos, audio, archives, installers, disk images, torrents — and for any fetch that is large, slow or flaky. " +
     "Accepts HTTP(S)/FTP(S)/SFTP URLs (pass several to join them into one task), magnet links, or a local .torrent file; exactly one of urls / magnet / torrentPath is required. " +
-    "Returns the task id immediately by default; pass wait=true to block until it completes. " +
+    "Two modes: mode=\"async\" (default) submits and returns the task id immediately so the transfer runs in Motrix while you keep working; mode=\"sync\" blocks until a terminal status and streams progress, reporting completed/failed/timed-out. " +
     "Use web_fetch / fetch_content instead only when the fetched content must be read in context rather than saved as a file. " +
     "Needs the Motrix desktop app; if it is not running the call fails with an explicit instruction to start it, so try it directly instead of pre-checking.",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
@@ -173,6 +180,7 @@ const motrixDownload = defineTool({
     "Default to motrix_download whenever a resource must be downloaded or saved to disk (files, videos, audio, models, datasets, archives, torrents, magnet links) — never fall back to curl, wget or a plain fetch for that.",
     "For proxy-only or geo-restricted sources, prefer motrix_download with its proxy (and headers) parameters over a shell curl: routing is per download, and the transfer still resumes and parallelizes.",
     "Prefer it for slow or blocked sources: parallel multi-connection download, resume, and per-download proxy/headers make it far more reliable than a single-connection shell command here.",
+    "Pick the mode: leave the default async when the file is not needed right away (hand the task id back and use motrix_wait later); use mode=\"sync\" when the very next step needs the file on disk.",
     "When the user asks for progress or the result of a download, use motrix_wait or motrix_tasks instead of re-submitting it.",
   ],
   parameters: downloadParams,
@@ -185,7 +193,7 @@ const motrixDownload = defineTool({
     const built = await buildAddParams(params);
     const task = await addDownload(endpoint, built, signal);
 
-    if (params.wait) {
+    if (isSyncMode(params)) {
       const outcome = await waitForTask(
         endpoint,
         task.id,
@@ -227,7 +235,7 @@ const motrixDownload = defineTool({
     return {
       content: [{
         type: "text",
-        text: `Download submitted (running in Motrix in the background).\n${taskBlock(task)}\nTrack it with motrix_task (action: get, taskId: ${task.id}) or pass wait=true next time to block until done.`,
+        text: `Download submitted (async; the transfer keeps running in Motrix in the background).\n${taskBlock(task)}\nTrack it with motrix_wait or motrix_task (action: get, taskId: ${task.id}), or pass mode="sync" next time to block until done.`,
       }],
       details: task,
     };
@@ -247,7 +255,7 @@ const motrixWait = defineTool({
     "Use after motrix_download (default async submit) or for tasks already queued in Motrix. " +
     "Returns the final snapshot; on timeout the task keeps running. " +
     "Paused tasks never finish — resume them first. " +
-    "When submitting a fresh download you can block immediately with motrix_download wait=true instead.",
+    "When submitting a fresh download you can block immediately with motrix_download mode=\"sync\" instead.",
   annotations: { readOnlyHint: true },
   parameters: waitParams,
   async execute(_toolCallId, params, signal, onUpdate) {
