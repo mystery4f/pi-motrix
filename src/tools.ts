@@ -41,9 +41,13 @@ const selectedFilesSchema = Type.Optional(
 const idempotencyKeySchema = Type.Optional(
   Type.String({ description: "Optional idempotency key: submitting the same key twice reuses the existing task instead of duplicating it" }),
 );
+const taskIdSchema = Type.String({ description: "Task id from motrix_download or motrix_tasks" });
+const waitTimeoutSchema = Type.Optional(
+  Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to block before returning (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` }),
+);
 
 const downloadParams = Type.Object({
-  urls: Type.Optional(Type.Array(Type.String(), { description: "HTTP(S)/FTP/SFTP URLs to download (one or more, joined into one task); e.g. [\"https://example.com/file.zip\"]" })),
+  urls: Type.Optional(Type.Array(Type.String(), { description: 'HTTP(S)/FTP(S)/SFTP URLs to download, joined into one task; e.g. ["https://example.com/file.zip"]. Exactly one of urls / magnet / torrentPath is required' })),
   magnet: Type.Optional(Type.String({ description: "Magnet URI (magnet:?xt=...) to download via BitTorrent" })),
   torrentPath: Type.Optional(Type.String({ description: "Path to a local .torrent file" })),
   saveDir: saveDirSchema,
@@ -55,7 +59,7 @@ const downloadParams = Type.Object({
   displayName: Type.Optional(Type.String({ description: "Display name for torrent downloads" })),
   mode: Type.Optional(Type.Union([Type.Literal("async"), Type.Literal("sync")], { description: '"async" (default): submit and return the task id immediately so the download runs in Motrix while you keep working; "sync": block until the download reaches a terminal status (progress streams to the client), then report the outcome' })),
   wait: Type.Optional(Type.Boolean({ description: "Deprecated alias for mode: wait=true means mode=\"sync\", wait=false means mode=\"async\"; mode wins when both are given" })),
-  waitTimeoutSec: Type.Optional(Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to wait in sync mode (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` })),
+  waitTimeoutSec: waitTimeoutSchema,
   idempotencyKey: idempotencyKeySchema,
 });
 
@@ -168,12 +172,9 @@ const motrixDownload = defineTool({
   name: "motrix_download",
   label: "Motrix: Download",
   description:
-    "Download any resource to local disk through the local Motrix download manager (aria2 engine): parallel multi-connection transfer, resumable, and it keeps running after this process exits. " +
-    "Per-download proxy and HTTP headers: pass proxy (e.g. http://127.0.0.1:7890) and headers (referer, user-agent, cookie) so every download takes the network route it needs — this is the reliable way to pull from slow, geo-restricted or proxy-only sources instead of shelling out to curl. " +
-    "This is the default tool for anything that must end up as a file on disk — models, datasets, videos, audio, archives, installers, disk images, torrents — and for any fetch that is large, slow or flaky. " +
-    "Accepts HTTP(S)/FTP(S)/SFTP URLs (pass several to join them into one task), magnet links, or a local .torrent file; exactly one of urls / magnet / torrentPath is required. " +
-    "Two modes: mode=\"async\" (default) submits and returns the task id immediately so the transfer runs in Motrix while you keep working; mode=\"sync\" blocks until a terminal status and streams progress, reporting completed/failed/timed-out. " +
-    "Use web_fetch / fetch_content instead only when the fetched content must be read in context rather than saved as a file. " +
+    "Download any resource to local disk through the local Motrix download manager (aria2 engine): parallel multi-connection, resumable, and it keeps running after this process exits. " +
+    "The default tool for anything that must end up as a file on disk — models, datasets, videos, audio, archives, installers, disk images, torrents — and for large, slow or flaky fetches. " +
+    "Use web_fetch / fetch_content instead only when the fetched content must be read in context rather than saved. " +
     "Needs the Motrix desktop app; if it is not running the call fails with an explicit instruction to start it, so try it directly instead of pre-checking.",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   promptGuidelines: [
@@ -243,19 +244,16 @@ const motrixDownload = defineTool({
 });
 
 const waitParams = Type.Object({
-  taskId: Type.String({ description: "Task id from motrix_download or motrix_tasks" }),
-  waitTimeoutSec: Type.Optional(Type.Integer({ minimum: 5, maximum: 3600, description: `Max seconds to wait (default ${DEFAULT_WAIT_TIMEOUT_SEC}); on timeout the task keeps running` })),
+  taskId: taskIdSchema,
+  waitTimeoutSec: waitTimeoutSchema,
 });
 
 const motrixWait = defineTool({
   name: "motrix_wait",
   label: "Motrix: Wait For Task",
   description:
-    "Wait for an existing Motrix download task to finish, streaming live progress. " +
-    "Use after motrix_download (default async submit) or for tasks already queued in Motrix. " +
-    "Returns the final snapshot; on timeout the task keeps running. " +
-    "Paused tasks never finish — resume them first. " +
-    "When submitting a fresh download you can block immediately with motrix_download mode=\"sync\" instead.",
+    "Wait for an existing Motrix task to reach a terminal status, streaming live progress. " +
+    "Use it after an async motrix_download, or for tasks already queued in Motrix; when a fresh download is needed right away, prefer motrix_download with mode=\"sync\".",
   annotations: { readOnlyHint: true },
   parameters: waitParams,
   async execute(_toolCallId, params, signal, onUpdate) {
@@ -327,7 +325,7 @@ const motrixTasks = defineTool({
 
 type TaskControlDetails = TaskGetResult | { removed: string; deleteFiles: boolean };
 const taskParams = Type.Object({
-  taskId: Type.String({ description: "Task id from motrix_download or motrix_tasks" }),
+  taskId: taskIdSchema,
   action: Type.Union([Type.Literal("get"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("remove")], { description: "get: snapshot; pause/resume: control the task; remove: delete it from the list" }),
   deleteFiles: Type.Optional(Type.Boolean({ description: "With action=remove: also delete downloaded files from disk (default false)" })),
 });
@@ -335,7 +333,7 @@ const taskParams = Type.Object({
 const motrixTask = defineTool({
   name: "motrix_task",
   label: "Motrix: Task Control",
-  description: "Inspect or control one Motrix download task: get its live snapshot, pause, resume, or remove it (optionally deleting the files).",
+  description: "Control one existing Motrix task (pause, resume, remove) or read its current snapshot without waiting.",
   annotations: { readOnlyHint: false, destructiveHint: true },
   parameters: taskParams,
   async execute(_toolCallId, params, signal): Promise<AgentToolResult<TaskControlDetails>> {
